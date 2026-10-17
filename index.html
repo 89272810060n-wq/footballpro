@@ -46,23 +46,40 @@
     <!-- ВВОД МАТЧА (ТОЛЬКО ДЛЯ СУДЬИ) -->
     <div class="card judge-only">
         <h2>Ввод результата матча (Панель Судьи)</h2>
-        <div class="row">
-            <select id="t1" onchange="resetScorers()"></select>
-            <div class="btn-box">
-                <button class="btn-circle" onclick="changeVal('s1', -1)">-</button>
-                <span id="s1" class="score">0</span>
-                <button class="btn-circle" onclick="changeVal('s1', 1)">+</button>
+        
+        <!-- Команда 1 -->
+        <div class="row" style="flex-direction: column; align-items: stretch; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <select id="t1" onchange="resetScorers()"></select>
+                <div class="btn-box">
+                    <button class="btn-circle" onclick="changeVal('s1', -1)">-</button>
+                    <span id="s1" class="score">0</span>
+                    <button class="btn-circle" onclick="openPlayerSelector(1)">+</button>
+                </div>
             </div>
+            <!-- Сюда будут выводиться крупные кнопки игроков Команды 1 для тапа -->
+            <div id="players-selector-1" style="display: none; background: #e9ecef; padding: 8px; border-radius: 6px; gap: 5px; flex-wrap: wrap;"></div>
         </div>
+
         <div style="text-align:center; font-weight:bold; color:#888; font-size:14px; margin: 4px 0;">против</div>
-        <div class="row">
-            <select id="t2" onchange="resetScorers()"></select>
-            <div class="btn-box">
-                <button class="btn-circle" onclick="changeVal('s2', -1)">-</button>
-                <span id="s2" class="score">0</span>
-                <button class="btn-circle" onclick="changeVal('s2', 1)">+</button>
+
+        <!-- Команда 2 -->
+        <div class="row" style="flex-direction: column; align-items: stretch; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <select id="t2" onchange="resetScorers()"></select>
+                <div class="btn-box">
+                    <button class="btn-circle" onclick="changeVal('s2', -1)">-</button>
+                    <span id="s2" class="score">0</span>
+                    <button class="btn-circle" onclick="openPlayerSelector(2)">+</button>
+                </div>
             </div>
+            <!-- Сюда будут выводиться крупные кнопки игроков Команды 2 для тапа -->
+            <div id="players-selector-2" style="display: none; background: #e9ecef; padding: 8px; border-radius: 6px; gap: 5px; flex-wrap: wrap;"></div>
         </div>
+
+        <!-- Кнопка для просмотра и исправления авторов голов текущего матча -->
+        <div id="current-scorers-review" style="font-size: 13px; color: #555; margin: 10px 0; padding: 5px; background: #fff3cd; border-radius: 6px; display: none;"></div>
+
         <button class="btn-main" onclick="saveMatchData()">Сохранить матч в облако</button>
     </div>
 
@@ -165,12 +182,7 @@
         });
     }
 
-    function resetScorers() {
-        currentMatchScorers1 = [];
-        currentMatchScorers2 = [];
-        document.getElementById('s1').innerText = "0";
-        document.getElementById('s2').innerText = "0";
-    }
+    
 
     function editNames() {
         let p1 = prompt("Команда 1:", teams[0]);
@@ -202,14 +214,144 @@
         refresh();
     }
 
+    
+
+    // Открытие панели выбора игроков прямо под кнопками счета
+    function openPlayerSelector(teamNum) {
+        var teamName = document.getElementById('t' + teamNum).value;
+        var container = document.getElementById('players-selector-' + teamNum);
+        if (!container) return;
+
+        // Если панель уже открыта — закрываем её
+        if (container.style.display === 'flex') {
+            container.style.display = 'none';
+            return;
+        }
+
+        var availablePlayers = teamPlayers[teamName] || [];
+        if (availablePlayers.length === 0) {
+            alert("Сначала задайте имена игроков через шестеренку!");
+            return;
+        }
+
+        // Генерируем крупные удобные кнопки для пальцев смартфона
+        container.innerHTML = availablePlayers.map(function(player) {
+            return '<button type="button" style="padding: 10px 14px; background: white; border: 1px solid #007bff; border-radius: 6px; font-weight: bold; color: #007bff; cursor: pointer; font-size: 14px;" ' +
+                   'onclick="addGoalViaTap(' + teamNum + ', \'' + player.replace(/'/g, "\\'") + '\')">' + 
+                   player + 
+                   '</button>';
+        }).join('');
+
+        container.style.display = 'flex';
+    }
+
+    // Фиксация гола при тапе по кнопке игрока
+    function addGoalViaTap(teamNum, playerName) {
+        var scoreNode = document.getElementById('s' + teamNum);
+        var currentScore = parseInt(scoreNode.innerText);
+        
+        // Увеличиваем командный счет на 1
+        scoreNode.innerText = currentScore + 1;
+
+        // Добавляем игрока в список авторов текущего матча
+        if (teamNum === 1) {
+            currentMatchScorers1.push(playerName);
+        } else {
+            currentMatchScorers2.push(playerName);
+        }
+
+        // Сворачиваем панель после выбора для удобства
+        document.getElementById('players-selector-' + teamNum).style.display = 'none';
+        
+        // Обновляем строчку предпросмотра авторов голов
+        reviewCurrentScorers();
+    }
+
+    // Работа кнопки МИНУС (быстрое исправление ошибок)
+    function changeVal(id, delta) {
+        // Нас интересует только уменьшение счета (delta === -1)
+        if (delta >= 0) return; 
+
+        var node = document.getElementById(id);
+        var currentScore = parseInt(node.innerText);
+        var newScore = currentScore + delta;
+        if (newScore < 0) return;
+
+        // Физически уменьшаем счет на экране
+        node.innerText = newScore;
+
+        // Удаляем последнего забившего игрока (отмена последней ошибки)
+        if (id === 's1') {
+            currentMatchScorers1.pop();
+        } else if (id === 's2') {
+            currentMatchScorers2.pop();
+        }
+
+        reviewCurrentScorers();
+    }
+
+    // Вывод текущих авторов голов на экран перед отправкой в облако
+    function reviewCurrentScorers() {
+        var reviewNode = document.getElementById('current-scorers-review');
+        if (!reviewNode) return;
+
+        if (currentMatchScorers1.length === 0 && currentMatchScorers2.length === 0) {
+            reviewNode.style.display = 'none';
+            return;
+        }
+
+        var t1Name = document.getElementById('t1').value;
+        var t2Name = document.getElementById('t2').value;
+
+        reviewNode.innerHTML = '<b>Авторы голов текущего матча:</b><br>' +
+            t1Name + ': ' + (currentMatchScorers1.join(', ') || '—') + '<br>' +
+            t2Name + ': ' + (currentMatchScorers2.join(', ') || '—');
+        
+        reviewNode.style.display = 'block';
+    }
+
+    // Полный сброс текущего набора при смене команд в меню
+    function resetScorers() {
+        currentMatchScorers1 = [];
+        currentMatchScorers2 = [];
+        document.getElementById('s1').innerText = "0";
+        document.getElementById('s2').innerText = "0";
+        
+        var r1 = document.getElementById('players-selector-1');
+        var r2 = document.getElementById('players-selector-2');
+        var rev = document.getElementById('current-scorers-review');
+        
+        if (r1) r1.style.display = 'none';
+        if (r2) r2.style.display = 'none';
+        if (rev) rev.style.display = 'none';
+    }
+
+    function saveMatchData() {
+        var teamA = document.getElementById('t1').value;
+        var teamB = document.getElementById('t2').value;
+        var sA = parseInt(document.getElementById('s1').innerText);
+        var sB = parseInt(document.getElementById('s2').innerText);
+
+        if (teamA === teamB) { alert("Ошибка: Одна и та же команда!"); return; }
+
+        games.push({ 
+            id: Date.now(), t1: teamA, s1: sA, t2: teamB, s2: sB,
+            scorers1: [...currentMatchScorers1], scorers2: [...currentMatchScorers2]
+        });
+
+        resetScorers();
+        syncToCloud();
+        refresh();
+    }
+
     function buildSelects(force = false) {
-        let select1 = document.getElementById('t1');
-        let select2 = document.getElementById('t2');
+        var select1 = document.getElementById('t1');
+        var select2 = document.getElementById('t2');
         if (!select1 || !select2) return;
         if (!force && select1.options.length > 0 && document.body.classList.contains('is-judge')) return;
         
-        let val1 = select1.value; let val2 = select2.value;
-let html = teams.map(function(t) { return '<option value="' + t + '">' + t + '</option>'; }).join('');
+        var val1 = select1.value; var val2 = select2.value;
+        var html = teams.map(function(t) { return '<option value="' + t + '">' + t + '</option>'; }).join('');
         select1.innerHTML = html; select2.innerHTML = html;
         
         if (!force && val1 && val2) {
@@ -220,66 +362,7 @@ let html = teams.map(function(t) { return '<option value="' + t + '">' + t + '</
         }
     }
 
-    function changeVal(id, delta) {
-        let node = document.getElementById(id);
-        let currentScore = parseInt(node.innerText);
-        let newScore = currentScore + delta;
-        if (newScore < 0) return;
-
-        let teamA = document.getElementById('t1').value;
-        let teamB = document.getElementById('t2').value;
-
-        if (id === 's1') {
-            if (delta > 0) {
-                let availablePlayers = teamPlayers[teamA] || [];
-                let msg = "Кто забил гол за " + teamA + "?\n" + availablePlayers.map(function(p, i) { return (i+1) + ". " + p; }).join('\n');
-                let choice = prompt(msg, "1");
-                let idx = parseInt(choice) - 1;
-                if (!isNaN(idx) && availablePlayers[idx]) {
-                    currentMatchScorers1.push(availablePlayers[idx]);
-                    node.innerText = newScore;
-                }
-            } else {
-                currentMatchScorers1.pop();
-                node.innerText = newScore;
-            }
-        } else if (id === 's2') {
-            if (delta > 0) {
-                let availablePlayers = teamPlayers[teamB] || [];
-                let msg = "Кто забил гол за " + teamB + "?\n" + availablePlayers.map(function(p, i) { return (i+1) + ". " + p; }).join('\n');
-                let choice = prompt(msg, "1");
-                let idx = parseInt(choice) - 1;
-                if (!isNaN(idx) && availablePlayers[idx]) {
-                    currentMatchScorers2.push(availablePlayers[idx]);
-                    node.innerText = newScore;
-                }
-            } else {
-                currentMatchScorers2.pop();
-                node.innerText = newScore;
-            }
-        }
-    }
-
-    function saveMatchData() {
-        let teamA = document.getElementById('t1').value;
-        let teamB = document.getElementById('t2').value;
-        let sA = parseInt(document.getElementById('s1').innerText);
-        let sB = parseInt(document.getElementById('s2').innerText);
-
-        if (teamA === teamB) { alert("Ошибка: Одна и та же команда!"); return; }
-
-        games.push({ 
-            id: Date.now(), t1: teamA, s1: sA, t2: teamB, s2: sB,
-            scorers1: [...currentMatchScorers1], scorers2: [...currentMatchScorers2]
-        });
-
-        document.getElementById('s1').innerText = "0";
-        document.getElementById('s2').innerText = "0";
-        currentMatchScorers1 = []; currentMatchScorers2 = [];
-
-        syncToCloud();
-        refresh();
-    }
+    
 
     function dropRow(indexToDelete) {
         if (!document.body.classList.contains('is-judge')) return;
