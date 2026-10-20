@@ -99,7 +99,10 @@
             <thead>
                 <tr>
                     <th style="text-align:left; padding-left:10px;">Команда</th>
-                    <th>В</th><th>Н</th><th>П</th><th>Мячи</th><th>Очки</th>
+                    <th>В</th><th>Н</th><th>П</th><th>Мячи</th>
+                    <th>Разница</th>
+                    <th>Рейтинг</th>
+                    <th>Очки</th>
                 </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -567,7 +570,8 @@
         var data = {}; 
         var playerStats = {};
         teams.forEach(function(t) {
-            data[t] = { w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+            // diff — разница мячей, rating — сила состава
+            data[t] = { w: 0, d: 0, l: 0, gf: 0, ga: 0, diff: 0, pts: 0, rating: teamRatings[t] || 0 };
             var players = teamPlayers[t] || [];
             players.forEach(function(p) { playerStats[p] = 0; });
         });
@@ -587,14 +591,32 @@
             }
         });
 
-        var order = [...teams].sort(function(x, y) { return (data[y].pts !== data[x].pts) ? data[y].pts - data[x].pts : data[y].gf - data[x].gf; });
+        // Разница мячей
+        teams.forEach(function(t) {
+            data[t].diff = data[t].gf - data[t].ga;
+        });
+
+        // Сортировка: очки → разница мячей → забитые → рейтинг команды
+        var order = [...teams].sort(function(x, y) {
+            if (data[y].pts !== data[x].pts) return data[y].pts - data[x].pts;
+            if (data[y].diff !== data[x].diff) return data[y].diff - data[x].diff;
+            if (data[y].gf !== data[x].gf) return data[y].gf - data[x].gf;
+            return data[y].rating - data[x].rating;
+        });
+
         document.getElementById('table-body').innerHTML = order.map(function(t) { 
+            var diffVal = data[t].diff;
+            var diffText = (diffVal > 0 ? '+' : '') + diffVal;
+            var diffColor = diffVal > 0 ? 'var(--suc)' : (diffVal < 0 ? 'var(--dng)' : '#666');
+
             return '<tr>' +
                 '<td style="text-align:left; padding-left:10px; font-weight:bold;">' + t + '</td>' +
                 '<td>' + data[t].w + '</td>' +
                 '<td>' + data[t].d + '</td>' +
                 '<td>' + data[t].l + '</td>' +
                 '<td style="color:#666;"><b>' + data[t].gf + '</b>:' + data[t].ga + '</td>' +
+                '<td style="font-weight:bold; color:' + diffColor + ';">' + diffText + '</td>' +
+                '<td style="font-weight:bold; color:var(--prm);">' + data[t].rating.toFixed(2) + '</td>' +
                 '<td style="font-weight:bold; color:var(--prm); font-size:16px;">' + data[t].pts + '</td>' +
             '</tr>';
         }).join('');
