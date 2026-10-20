@@ -626,19 +626,47 @@
             }).join('');
     }
 
-    // Обнуление всего турнира (опасная зона)
+    // Обнуление всего турнира (опасная зона) — сбрасывает и матчи, и составы команд
     async function clearAllTournamentData() {
         if (!document.body.classList.contains('is-judge')) return;
-        if (!confirm("ВНИМАНИЕ! Это удалит ВСЕ матчи, составы и имена команд текущего турнира. Продолжить?")) return;
+        if (!confirm("ВНИМАНИЕ! Это удалит ВСЕ матчи, а также СБРОСИТ СОСТАВЫ команд (все игроки станут «Игрок 1..5»). Продолжить?")) return;
+
+        // Сбрасываем матчи и таймер
         games = [];
         timeCurrent = timeMax;
+
+        // Сбрасываем составы команд на дефолтные заглушки
+        var freshTeamPlayers = {};
+        teams.forEach(function(t) {
+            freshTeamPlayers[t] = ["Игрок 1", "Игрок 2", "Игрок 3", "Игрок 4", "Игрок 5"];
+        });
+        teamPlayers = freshTeamPlayers;
+
+        // Сбрасываем рассчитанные рейтинги команд
+        teamRatings = {};
+
+        // Сбрасываем «силу состава» на экране
+        var el1 = document.getElementById('t1-rating-display');
+        var el2 = document.getElementById('t2-rating-display');
+        if (el1) el1.innerText = "Сила состава: 0.00";
+        if (el2) el2.innerText = "Сила состава: 0.00";
+
+        // Сбрасываем текущий матч (голы/счёт/селекторы)
+        resetScorers();
+
         try {
             await fetch(FIREBASE_URL + "/tournament.json", {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ teams: teams, teamPlayers: teamPlayers, teamRatings: teamRatings, games: [], timeCurrent: timeMax })
+                body: JSON.stringify({
+                    teams: teams,
+                    teamPlayers: teamPlayers,
+                    teamRatings: {},
+                    games: [],
+                    timeCurrent: timeMax
+                })
             });
-            alert("Турнир обнулён.");
+            alert("Турнир обнулён. Составы команд сброшены — сформируйте их заново через «⚙️ Составы команд».");
             refresh();
             showTime();
         } catch (e) {
