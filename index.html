@@ -210,15 +210,23 @@
             for (var i = 0; i < 5; i++) {
                 var currentSavedPlayer = (teamPlayers[t] && teamPlayers[t][i]) ? teamPlayers[t][i] : "";
 
-                var optionsHtml = playerNames.map(function(p) {
-                    var score = globalSeasonScorers[p].goals || 0;
-                    var gamesCount = globalSeasonScorers[p].games || 0;
-                    var winPts = globalSeasonScorers[p].winPts || 0;
-                    var avg = gamesCount > 0 ? ((winPts + score) / gamesCount) : 0;
+                // Заглушка «Игрок N» — если в слоте ещё не выбран реальный игрок из БД.
+                // Реальный = есть в globalSeasonScorers. Дефолтные "Игрок 1..5" — это не реальные.
+                var isRealPlayer = currentSavedPlayer && globalSeasonScorers[currentSavedPlayer];
+                var placeholderLabel = "Игрок " + (i + 1);
+                var placeholderSelected = isRealPlayer ? "" : "selected";
 
-                    var isSelected = p === currentSavedPlayer ? "selected" : "";
-                    return '<option value="' + p + '" ' + isSelected + '>' + p + ' (Рейт: ' + avg.toFixed(2) + ')</option>';
-                }).join('');
+                var optionsHtml =
+                    '<option value="" ' + placeholderSelected + ' disabled>' + placeholderLabel + '</option>' +
+                    playerNames.map(function(p) {
+                        var score = globalSeasonScorers[p].goals || 0;
+                        var gamesCount = globalSeasonScorers[p].games || 0;
+                        var winPts = globalSeasonScorers[p].winPts || 0;
+                        var avg = gamesCount > 0 ? ((winPts + score) / gamesCount) : 0;
+                
+                        var isSelected = p === currentSavedPlayer ? "selected" : "";
+                        return '<option value="' + p + '" ' + isSelected + '>' + p + ' (Рейт: ' + avg.toFixed(2) + ')</option>';
+                    }).join('');
 
                 // data-атрибуты, чтобы refreshRosterSelects() знал, кто именно меняется
                 selectsHtml += '<select class="p-select" ' +
@@ -311,7 +319,9 @@
             var list = [];
             for (var i = 0; i < 5; i++) {
                 var selectEl = document.getElementById('roster-select-' + teamIdx + '-' + i);
-                if (selectEl) list.push(selectEl.value);
+                var val = selectEl ? selectEl.value : "";
+                // Если слот остался заглушкой — сохраняем "Игрок N", чтобы длина была 5
+                list.push(val ? val : ("Игрок " + (i + 1)));
             }
 
             newTeams.push(newName);
