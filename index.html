@@ -175,11 +175,11 @@
     async function loadGlobalPlayersData() {
         try {
             let res = await fetch(FIREBASE_URL + "/season_archive.json");
-            let archive = await res.json();   // ← ИСПРАВЛЕНО: строка была потеряна
+            let archive = await res.json();
             if (archive && archive.seasonScorers) {
                 globalSeasonScorers = archive.seasonScorers;
-                calculateTeamRatings();       // ← пересчёт силы составов после загрузки
-                buildRosterEditors();         // Перестраиваем списки выбора
+                calculateTeamRatings();
+                buildRosterEditors();
             }
         } catch (e) { 
             console.log("Ошибка загрузки сезонных игроков", e); 
@@ -209,30 +209,99 @@
             var selectsHtml = "";
             for (var i = 0; i < 5; i++) {
                 var currentSavedPlayer = (teamPlayers[t] && teamPlayers[t][i]) ? teamPlayers[t][i] : "";
-                
+
                 var optionsHtml = playerNames.map(function(p) {
                     var score = globalSeasonScorers[p].goals || 0;
                     var gamesCount = globalSeasonScorers[p].games || 0;
                     var winPts = globalSeasonScorers[p].winPts || 0;
                     var avg = gamesCount > 0 ? ((winPts + score) / gamesCount) : 0;
-                    
+
                     var isSelected = p === currentSavedPlayer ? "selected" : "";
                     return '<option value="' + p + '" ' + isSelected + '>' + p + ' (Рейт: ' + avg.toFixed(2) + ')</option>';
                 }).join('');
 
-                selectsHtml += '<select class="p-select" id="roster-select-' + teamIdx + '-' + i + '">' + optionsHtml + '</select>';
+                // data-атрибуты, чтобы refreshRosterSelects() знал, кто именно меняется
+                selectsHtml += '<select class="p-select" ' +
+                               'id="roster-select-' + teamIdx + '-' + i + '" ' +
+                               'data-team-idx="' + teamIdx + '" data-slot-idx="' + i + '" ' +
+                               'onchange="refreshRosterSelects()">' + optionsHtml + '</select>';
             }
 
             return '<div style="margin-bottom:15px; background:#f1f3f5; padding:10px; border-radius:8px;">' +
                    '<input type="text" class="team-name-input" id="team-name-' + teamIdx + '" value="' + t.replace(/"/g, '&quot;') + '" placeholder="Название команды">' +
                    selectsHtml + '</div>';
         }).join('');
+
+        // Сразу же применяем блокировку выбранных игроков в остальных списках
+        refreshRosterSelects();
+    }
+
+    // Блокировка уже выбранных игроков во всех остальных выпадающих списках
+    function refreshRosterSelects() {
+        var allSelects = document.querySelectorAll('#roster-selectors-container select.p-select');
+        if (!allSelects.length) return;
+
+        // 1. Собираем всех выбранных игроков: { имя: [id селектов, где выбран] }
+        var chosenMap = {};
+        allSelects.forEach(function(sel) {
+            var val = sel.value;
+            if (!val) return;
+            if (!chosenMap[val]) chosenMap[val] = [];
+            chosenMap[val].push(sel.id);
+        });
+
+        // 2. Для каждого select перебираем опции и блокируем те,
+        //    что выбраны в ДРУГИХ селектах (не в нём самом)
+        allSelects.forEach(function(sel) {
+            var selfId = sel.id;
+            Array.prototype.forEach.call(sel.options, function(opt) {
+                var player = opt.value;
+                var owners = chosenMap[player] || [];
+                // Игрок занят в другом селекте?
+                var occupiedElsewhere = owners.some(function(otherId) { return otherId !== selfId; });
+                if (occupiedElsewhere) {
+                    opt.disabled = true;
+                    if (!opt.dataset.originalText) opt.dataset.originalText = opt.textContent;
+                    opt.textContent = '🔒 ' + opt.dataset.originalText;
+                } else {
+                    opt.disabled = false;
+                    if (opt.dataset.originalText) {
+                        opt.textContent = opt.dataset.originalText;
+                    }
+                }
+            });
+        });
     }
 
     // Сохранение имён команд, составов и расчет общего рейтинга команды
     function saveRosters() {
         var newTeams = [];
         var newTeamPlayers = {};
+
+        // 0. Предварительная проверка на дубликаты (до любых изменений)
+        var chosen = {};
+        var duplicates = [];
+        teams.forEach(function(t, teamIdx) {
+            for (var i = 0; i < 5; i++) {
+                var selectEl = document.getElementById('roster-select-' + teamIdx + '-' + i);
+                if (!selectEl) continue;
+                var player = selectEl.value;
+                if (!player) continue;
+                if (chosen[player]) {
+                    duplicates.push(player);
+                } else {
+                    chosen[player] = true;
+                }
+            }
+        });
+        if (duplicates.length > 0) {
+            // Уникализируем список для сообщения
+            var uniq = duplicates.filter(function(v, i, a) { return a.indexOf(v) === i; });
+            alert("Ошибка: игрок(и) выбраны более одного раза:\n— " + uniq.join("\n— ") +
+                  "\n\nИсправьте составы и сохраните снова.");
+            refreshRosterSelects();
+            return;
+        }
 
         teams.forEach(function(oldName, teamIdx) {
             var nameInput = document.getElementById('team-name-' + teamIdx);
@@ -404,7 +473,7 @@
     function runTimer() {
         if (audioObj.state === 'suspended') audioObj.resume();
         var b = document.getElementById('timer-btn');
-        if (clockId) {                                  // ← ИСПРАВЛЕНО: восстановлено начало функции
+        if (clockId) {
             clearInterval(clockId); 
             clockId = null;
             b.innerText = "Старт"; 
