@@ -217,7 +217,7 @@
                 var placeholderSelected = isRealPlayer ? "" : "selected";
 
                 var optionsHtml =
-                    '<option value="" ' + placeholderSelected + ' disabled>' + placeholderLabel + '</option>' +
+                    '<option value="" ' + placeholderSelected + '>' + placeholderLabel + '</option>' +
                     playerNames.map(function(p) {
                         var score = globalSeasonScorers[p].goals || 0;
                         var gamesCount = globalSeasonScorers[p].games || 0;
@@ -262,10 +262,22 @@
         //    что выбраны в ДРУГИХ селектах (не в нём самом)
         allSelects.forEach(function(sel) {
             var selfId = sel.id;
+            var hasRealSelected = !!sel.value; // в этом селекте выбран реальный игрок
+
             Array.prototype.forEach.call(sel.options, function(opt) {
                 var player = opt.value;
+
+                // Заглушка "Игрок N" (value="")
+                if (!player) {
+                    // Если реальный игрок уже выбран — заглушку прячем из списка,
+                    // но она остаётся selected и не блокирует открытие select.
+                    // Если реальный ещё не выбран — заглушка видна как текущее значение.
+                    opt.hidden = hasRealSelected;
+                    opt.disabled = false;
+                    return;
+                }
+
                 var owners = chosenMap[player] || [];
-                // Игрок занят в другом селекте?
                 var occupiedElsewhere = owners.some(function(otherId) { return otherId !== selfId; });
                 if (occupiedElsewhere) {
                     opt.disabled = true;
