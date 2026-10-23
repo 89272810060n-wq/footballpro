@@ -1,4 +1,4 @@
--<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -116,6 +116,54 @@
         }
         .btn-autogoal:hover { background: #ffe9a8; }
         .btn-autogoal:active { background: #ffd75e; }
+
+        /* --- Текущий матч (табло) --- */
+        .live-card {
+            border: 2px solid var(--suc);
+            background: linear-gradient(180deg, #f4fff8 0%, #ffffff 100%);
+            display: none;
+        }
+        .live-card.visible { display: block; }
+        .live-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px; font-size: 13px; color: #666;
+            font-weight: bold; letter-spacing: 0.5px;
+        }
+        .live-dot {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+            background: var(--suc); margin-right: 6px; animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .live-score-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 10px; margin: 6px 0;
+        }
+        .live-team { flex: 1; font-size: 15px; font-weight: bold; }
+        .live-team.right { text-align: right; }
+        .live-score {
+            font-size: 32px; font-weight: bold; color: var(--drk);
+            min-width: 100px; text-align: center; letter-spacing: 2px;
+        }
+        .live-scorers {
+            font-size: 12px; color: #666; padding-left: 4px;
+            line-height: 1.4; margin-top: 4px;
+        }
+        .live-scorers b { color: var(--drk); }
+        .live-empty {
+            text-align: center; padding: 12px; color: #888;
+            font-style: italic; font-size: 13px;
+        }
+
+        /* --- Подсветка одинаковых голов в бомбардирах --- */
+        .scorers-group-1 { background: #ffe0e0; }  /* красноватый */
+        .scorers-group-2 { background: #e0ffe2; }  /* зелёный */
+        .scorers-group-3 { background: #e0ecff; }  /* голубой */
+        .scorers-group-4 { background: #fff4d6; }  /* жёлтый */
+        .scorers-group-5 { background: #f0e0ff; }  /* сиреневый */
+        .scorers-group-6 { background: #ffecd9; }  /* оранжевый */
+        .scorers-group-7 { background: #d9f6f6; }  /* бирюзовый */
+        .scorers-group-8 { background: #f7e2ef; }  /* розовый */
+        .scorers-row-top td { font-weight: 900; }
     </style>
 </head>
 <body>
@@ -126,6 +174,17 @@
             <button class="btn-set" onclick="toggleRosterViewer()">👁 Составы команд</button>
             <button class="btn-set judge-only" onclick="toggleRosterEditor()">⚙️ Редактировать составы</button>
             <button class="btn-set" style="background: #ffc107;" onclick="activateJudgeMode()">🔑 Я Судья</button>
+        </div>
+    </div>
+
+    <!-- ТЕКУЩИЙ МАТЧ (виден всем, пока идёт матч) -->
+    <div class="card live-card" id="live-card">
+        <div class="live-header">
+            <span><span class="live-dot"></span>ТЕКУЩИЙ МАТЧ</span>
+            <span id="live-timer-badge">—</span>
+        </div>
+        <div id="live-content">
+            <div class="live-empty">Матч ещё не начался</div>
         </div>
     </div>
 
@@ -140,7 +199,6 @@
         <h2>⚙ Формирование составов на игровой день</h2>
         <div id="roster-selectors-container"></div>
 
-        <!-- Перетасовка -->
         <div class="shuffle-wrap">
             <button class="btn-shuffle" onclick="shuffleRosters()">🎲 Перетасовать составы</button>
             <div id="shuffle-result" style="display:none;"></div>
@@ -232,7 +290,7 @@
 
 <script>
     const FIREBASE_URL = "https://football-7ea89-default-rtdb.europe-west1.firebasedatabase.app";
-    const AUTOGOAL = "Автогол"; // Специальный ключ в таблице бомбардиров
+    const AUTOGOAL = "Автогол";
 
     let teams = ["Красные", "Синие", "Зеленые"];
     let teamPlayers = {
@@ -248,10 +306,21 @@
     let games = [];
     let timeMax = 7 * 60; let timeCurrent = timeMax; let clockId = null;
     let currentMatchScorers1 = []; let currentMatchScorers2 = [];
-    // Счётчики автоголов в ТЕКУЩЕМ матче:
-    // currentMatchAutogoals1 — сколько автоголов засчитано команде t1 (соперник забил в свои)
-    // currentMatchAutogoals2 — сколько автоголов засчитано команде t2
     let currentMatchAutogoals1 = 0; let currentMatchAutogoals2 = 0;
+
+    // Live-state текущего матча — синхронизируется через Firebase,
+    // чтобы табло видели все пользователи.
+    let liveState = {
+        active: false,
+        t1: "",
+        t2: "",
+        s1: 0,
+        s2: 0,
+        scorers1: [],
+        scorers2: [],
+        timeCurrent: timeMax,
+        timerRunning: false
+    };
 
     const audioObj = new (window.AudioContext || window.webkitAudioContext)();
     function beep() {
@@ -278,6 +347,106 @@
             refresh();
             renderRosterViewer();
         } else { alert("Неверный пароль!"); }
+    }
+
+    // ---------------- LIVE-ТАБЛО ----------------
+    // Обновляет локальный live-state по текущим значениям панели ввода.
+    function refreshLiveStateFromInputs() {
+        var t1 = document.getElementById('t1') ? document.getElementById('t1').value : "";
+        var t2 = document.getElementById('t2') ? document.getElementById('t2').value : "";
+        var s1 = document.getElementById('s1') ? parseInt(document.getElementById('s1').innerText) : 0;
+        var s2 = document.getElementById('s2') ? parseInt(document.getElementById('s2').innerText) : 0;
+
+        var scorers1List = [...currentMatchScorers1];
+        for (var a = 0; a < currentMatchAutogoals1; a++) scorers1List.push(AUTOGOAL);
+        var scorers2List = [...currentMatchScorers2];
+        for (var b = 0; b < currentMatchAutogoals2; b++) scorers2List.push(AUTOGOAL);
+
+        var isMatchMeaningful = (t1 && t2 && (s1 > 0 || s2 > 0 || scorers1List.length > 0 || scorers2List.length > 0));
+
+        liveState = {
+            active: isMatchMeaningful,
+            t1: t1, t2: t2,
+            s1: s1, s2: s2,
+            scorers1: scorers1List,
+            scorers2: scorers2List,
+            timeCurrent: timeCurrent,
+            timerRunning: !!clockId
+        };
+
+        renderLiveCard();
+    }
+
+    function renderLiveCard() {
+        var card = document.getElementById('live-card');
+        var content = document.getElementById('live-content');
+        var badge = document.getElementById('live-timer-badge');
+        if (!card || !content || !badge) return;
+
+        if (!liveState.active) {
+            card.classList.remove('visible');
+            return;
+        }
+
+        card.classList.add('visible');
+
+        var t1Name = liveState.t1 || '—';
+        var t2Name = liveState.t2 || '—';
+
+        var m = Math.floor(liveState.timeCurrent / 60), s = liveState.timeCurrent % 60;
+        var timeStr = m.toString().padStart(2,'0') + ":" + s.toString().padStart(2,'0');
+        var timerLabel = liveState.timerRunning ? "⏱ " + timeStr : (liveState.timeCurrent === 0 ? "⏱ Завершено" : "⏸ Пауза " + timeStr);
+
+        function scorersStr(list) {
+            if (!list || list.length === 0) return '—';
+            return list.join(', ');
+        }
+
+        var hasScorers1 = liveState.scorers1 && liveState.scorers1.length > 0;
+        var hasScorers2 = liveState.scorers2 && liveState.scorers2.length > 0;
+        var scorersHtml = '';
+        if (hasScorers1 || hasScorers2) {
+            scorersHtml =
+                '<div style="display:flex; justify-content:space-between; gap:8px; margin-top:8px;">' +
+                    '<div class="live-scorers" style="flex:1; text-align:left;"><b>' + t1Name + ':</b> ' + scorersStr(liveState.scorers1) + '</div>' +
+                    '<div class="live-scorers" style="flex:1; text-align:right;"><b>' + t2Name + ':</b> ' + scorersStr(liveState.scorers2) + '</div>' +
+                '</div>';
+        }
+
+        content.innerHTML =
+            '<div class="live-score-row">' +
+                '<div class="live-team">' + t1Name + '</div>' +
+                '<div class="live-score">' + liveState.s1 + ' : ' + liveState.s2 + '</div>' +
+                '<div class="live-team right">' + t2Name + '</div>' +
+            '</div>' +
+            scorersHtml;
+
+        badge.innerText = timerLabel;
+    }
+
+    async function pushLiveStateToCloud() {
+        if (!document.body.classList.contains('is-judge')) return;
+        try {
+            await fetch(FIREBASE_URL + "/live_match.json", {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(liveState)
+            });
+        } catch (e) {}
+    }
+
+    async function clearLiveStateInCloud() {
+        if (!document.body.classList.contains('is-judge')) return;
+        try {
+            await fetch(FIREBASE_URL + "/live_match.json", {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    active: false, t1: "", t2: "", s1: 0, s2: 0,
+                    scorers1: [], scorers2: [], timeCurrent: timeMax, timerRunning: false
+                })
+            });
+        } catch (e) {}
     }
 
     // ---------------- ПРОСМОТР СОСТАВОВ ----------------
@@ -388,7 +557,6 @@
                     '</div>';
             }
 
-            // 6-й слот — «Автогол», заблокирован для выбора, отображается отдельно
             slotsHtml +=
                 '<div class="pslot pslot-autogoal" style="opacity:0.7;">' +
                     '<div class="pslot-field">' +
@@ -839,6 +1007,7 @@
         var sel2 = document.getElementById('t2');
         rebuildTeamSelect(sel2, v1);
         resetScorers();
+        refreshLiveStateFromInputs();
     }
 
     function onTeam2Change() {
@@ -846,6 +1015,7 @@
         var sel1 = document.getElementById('t1');
         rebuildTeamSelect(sel1, v2);
         resetScorers();
+        refreshLiveStateFromInputs();
     }
 
     function rebuildTeamSelect(selectEl, excludeTeam) {
@@ -889,10 +1059,10 @@
         else currentMatchScorers2.push(playerName);
         document.getElementById('players-selector-' + teamNum).style.display = 'none';
         reviewCurrentScorers();
+        refreshLiveStateFromInputs();
+        pushLiveStateToCloud();
     }
 
-    // Засчитать автогол КОМАНДЕ teamNum. Гол идёт в её счёт, автор — «Автогол».
-    // По футбольным правилам это значит: соперник забил в свои ворота, гол в пользу teamNum.
     function addAutogoal(teamNum) {
         var scoreNode = document.getElementById('s' + teamNum);
         var currentScore = parseInt(scoreNode.innerText);
@@ -903,6 +1073,8 @@
 
         document.getElementById('players-selector-' + teamNum).style.display = 'none';
         reviewCurrentScorers();
+        refreshLiveStateFromInputs();
+        pushLiveStateToCloud();
     }
 
     function changeVal(id, delta) {
@@ -913,14 +1085,7 @@
         if (newScore < 0) return;
         node.innerText = newScore;
 
-        // При отмене гола: сначала убираем автогол, если он есть, потом обычный гол
         if (id === 's1') {
-            if (currentMatchAutogoals1 > 0 && currentMatchAutogoals1 >= currentMatchScorers1.length) {
-                // нет смысла сопоставлять — просто уменьшаем ту категорию, которая больше
-            }
-            // Приоритет: убираем последний добавленный тип.
-            // Простая логика: если автоголов больше нуля и последний добавленный "тип" неизвестен,
-            // убираем автогол, если автоголов не меньше, чем обычных голов. Иначе обычный.
             if (currentMatchAutogoals1 > 0 && currentMatchAutogoals1 >= currentMatchScorers1.length) {
                 currentMatchAutogoals1--;
             } else if (currentMatchScorers1.length > 0) {
@@ -939,6 +1104,8 @@
         }
 
         reviewCurrentScorers();
+        refreshLiveStateFromInputs();
+        pushLiveStateToCloud();
     }
 
     function reviewCurrentScorers() {
@@ -972,6 +1139,7 @@
         if (document.getElementById('players-selector-2')) document.getElementById('players-selector-2').style.display = 'none';
         if (document.getElementById('current-scorers-review')) document.getElementById('current-scorers-review').style.display = 'none';
         updateRatingDisplays();
+        refreshLiveStateFromInputs();
     }
 
     async function saveMatchData() {
@@ -982,9 +1150,6 @@
         if (!teamA || !teamB) { alert("Выберите обе команды!"); return; }
         if (teamA === teamB) { alert("Ошибка: Одна и та же команда!"); return; }
 
-        // Собираем авторов голов: обычные + автоголы
-        // ВАЖНО: автогол засчитывается команде-сопернику (по футбольным правилам),
-        // но в таблице бомбардиров фиксируется как «Автогол».
         var scorers1List = [...currentMatchScorers1];
         for (var a = 0; a < currentMatchAutogoals1; a++) scorers1List.push(AUTOGOAL);
 
@@ -996,7 +1161,14 @@
             scorers1: scorers1List, scorers2: scorers2List,
             t1Rating: teamRatings[teamA] || 0, t2Rating: teamRatings[teamB] || 0
         });
-        resetScorers(); 
+        resetScorers();
+        // Сбрасываем live-табло у всех
+        liveState = {
+            active: false, t1: "", t2: "", s1: 0, s2: 0,
+            scorers1: [], scorers2: [], timeCurrent: timeMax, timerRunning: false
+        };
+        renderLiveCard();
+        await clearLiveStateInCloud();
         await syncToCloud(); 
         refresh();
         alert("Данные сохранены!");
@@ -1027,6 +1199,33 @@
         }, 2000);
     }
 
+    // Слушатель live-матча — чтобы все видели табло, даже не судья
+    function startLiveListener() {
+        setInterval(async () => {
+            try {
+                var res = await fetch(FIREBASE_URL + "/live_match.json");
+                var data = await res.json();
+                if (data && typeof data.active !== 'undefined') {
+                    // Обновляем liveState, но не затираем локальные значения у судьи,
+                    // если он как раз вводит матч
+                    if (document.body.classList.contains('is-judge')) return;
+                    liveState = {
+                        active: !!data.active,
+                        t1: data.t1 || "",
+                        t2: data.t2 || "",
+                        s1: Number(data.s1) || 0,
+                        s2: Number(data.s2) || 0,
+                        scorers1: Array.isArray(data.scorers1) ? data.scorers1 : [],
+                        scorers2: Array.isArray(data.scorers2) ? data.scorers2 : [],
+                        timeCurrent: Number(data.timeCurrent) || timeMax,
+                        timerRunning: !!data.timerRunning
+                    };
+                    renderLiveCard();
+                }
+            } catch (e) {}
+        }, 2000);
+    }
+
     function runTimer() {
         if (audioObj.state === 'suspended') audioObj.resume();
         var b = document.getElementById('timer-btn');
@@ -1036,6 +1235,8 @@
             b.innerText = "Старт"; 
             b.style.background = "#28a745"; 
             syncToCloud();
+            refreshLiveStateFromInputs();
+            pushLiveStateToCloud();
         } else {
             if (timeCurrent <= 0) clearTimer();
             b.innerText = "Пауза"; 
@@ -1043,7 +1244,11 @@
             clockId = setInterval(() => {
                 timeCurrent--; 
                 showTime();
-                if (timeCurrent % 5 === 0) syncToCloud(); 
+                if (timeCurrent % 5 === 0) {
+                    syncToCloud();
+                    refreshLiveStateFromInputs();
+                    pushLiveStateToCloud();
+                }
                 if (timeCurrent <= 0) {
                     clearInterval(clockId); 
                     clockId = null; 
@@ -1052,6 +1257,8 @@
                     document.getElementById('timer-display').classList.add('finished'); 
                     beep(); 
                     syncToCloud();
+                    refreshLiveStateFromInputs();
+                    pushLiveStateToCloud();
                 }
             }, 1000);
         }
@@ -1066,6 +1273,8 @@
         document.getElementById('timer-display').classList.remove('finished'); 
         showTime(); 
         syncToCloud();
+        refreshLiveStateFromInputs();
+        pushLiveStateToCloud();
     }
 
     function showTime() {
@@ -1109,7 +1318,6 @@
             var players = teamPlayers[t] || [];
             players.forEach(function(p) { playerStats[p] = 0; });
         });
-        // Убедимся, что в статистике есть ключ «Автогол», даже если его нет в составах
         if (playerStats[AUTOGOAL] === undefined) playerStats[AUTOGOAL] = 0;
 
         games = games.filter(function(g) { return g !== null && g !== undefined; });
@@ -1169,15 +1377,55 @@
                     '</div>';
             }).join('');
 
-        var scorersOrder = Object.keys(playerStats).map(function(n) { return { name: n, goals: playerStats[n] }; }).filter(function(p) { return p.goals > 0; }).sort(function(a, b) { return b.goals - a.goals; });
-        document.getElementById('scorers-body').innerHTML = scorersOrder.length === 0 ? '<tr><td colspan="3" style="color:#888; padding:10px;">Голов пока не было</td></tr>' : 
-            scorersOrder.map(function(p, idx) { 
-                return '<tr>' +
-                    '<td>' + (idx + 1) + '</td>' +
-                    '<td style="text-align:left; padding-left:10px; font-weight:bold;">' + p.name + '</td>' +
-                    '<td style="font-weight:bold; color:var(--suc); font-size:16px;">' + p.goals + '</td>' +
-                '</tr>'; 
-            }).join('');
+        // Бомбардиры с подсветкой одинаковых значений голов
+        renderScorersWithGroups(playerStats);
+    }
+
+    // Отрисовка таблицы бомбардиров с цветовой группировкой по числу голов.
+    // Игроки с одинаковым количеством голов получают одинаковый цвет.
+    function renderScorersWithGroups(playerStats) {
+        var scorersOrder = Object.keys(playerStats)
+            .map(function(n) { return { name: n, goals: playerStats[n] }; })
+            .filter(function(p) { return p.goals > 0; })
+            .sort(function(a, b) {
+                if (b.goals !== a.goals) return b.goals - a.goals;
+                return a.name.localeCompare(b.name);
+            });
+
+        var tbody = document.getElementById('scorers-body');
+        if (!tbody) return;
+
+        if (scorersOrder.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="color:#888; padding:10px;">Голов пока не было</td></tr>';
+            return;
+        }
+
+        // Группируем по числу голов
+        var groups = {}; // goals -> [names]
+        scorersOrder.forEach(function(p) {
+            if (!groups[p.goals]) groups[p.goals] = [];
+            groups[p.goals].push(p.name);
+        });
+
+        // Присваиваем уникальным значениям голов уникальные классы цветов (1..8)
+        var goalsValues = Object.keys(groups).map(Number).sort(function(a,b){ return b-a; }); // по убыванию
+        var classMap = {};
+        goalsValues.forEach(function(g, idx) {
+            classMap[g] = 'scorers-group-' + ((idx % 8) + 1);
+        });
+
+        // Определяем, кто на 1-м месте (максимум голов) — для жирного шрифта
+        var maxGoals = goalsValues[0];
+
+        tbody.innerHTML = scorersOrder.map(function(p, idx) {
+            var cls = classMap[p.goals] || '';
+            var topCls = (p.goals === maxGoals) ? ' scorers-row-top' : '';
+            return '<tr class="' + cls + topCls + '">' +
+                '<td>' + (idx + 1) + '</td>' +
+                '<td style="text-align:left; padding-left:10px; font-weight:bold;">' + p.name + '</td>' +
+                '<td style="font-weight:bold; color:var(--suc); font-size:16px;">' + p.goals + '</td>' +
+            '</tr>';
+        }).join('');
     }
 
     async function clearAllTournamentData() {
@@ -1203,8 +1451,14 @@
         if (el2) el2.innerText = "Сила состава: 0.00";
 
         resetScorers();
+        liveState = {
+            active: false, t1: "", t2: "", s1: 0, s2: 0,
+            scorers1: [], scorers2: [], timeCurrent: timeMax, timerRunning: false
+        };
+        renderLiveCard();
 
         try {
+            await clearLiveStateInCloud();
             await fetch(FIREBASE_URL + "/tournament.json", {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -1230,7 +1484,9 @@
         showTime(); 
         refresh(); 
         startCloudListener(); 
+        startLiveListener();
         loadGlobalPlayersData();
+        refreshLiveStateFromInputs();
         
         var mainBody = document.body;
         if (mainBody) {
