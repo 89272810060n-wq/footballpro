@@ -155,15 +155,47 @@
         }
 
         /* --- Подсветка одинаковых голов в бомбардирах --- */
-        .scorers-group-1 { background: #ffe0e0; }  /* красноватый */
-        .scorers-group-2 { background: #e0ffe2; }  /* зелёный */
-        .scorers-group-3 { background: #e0ecff; }  /* голубой */
-        .scorers-group-4 { background: #fff4d6; }  /* жёлтый */
-        .scorers-group-5 { background: #f0e0ff; }  /* сиреневый */
-        .scorers-group-6 { background: #ffecd9; }  /* оранжевый */
-        .scorers-group-7 { background: #d9f6f6; }  /* бирюзовый */
-        .scorers-group-8 { background: #f7e2ef; }  /* розовый */
+        .scorers-group-1 { background: #ffe0e0; }
+        .scorers-group-2 { background: #e0ffe2; }
+        .scorers-group-3 { background: #e0ecff; }
+        .scorers-group-4 { background: #fff4d6; }
+        .scorers-group-5 { background: #f0e0ff; }
+        .scorers-group-6 { background: #ffecd9; }
+        .scorers-group-7 { background: #d9f6f6; }
+        .scorers-group-8 { background: #f7e2ef; }
         .scorers-row-top td { font-weight: 900; }
+
+        /* --- График --- */
+        .chart-wrap {
+            position: relative; width: 100%; overflow: hidden;
+            background: #fafbfc; border-radius: 8px;
+        }
+        #chart-canvas { display: block; width: 100%; height: 320px; }
+        .chart-legend {
+            display: flex; flex-wrap: wrap; gap: 12px;
+            margin-top: 10px; font-size: 13px;
+        }
+        .chart-legend-item {
+            display: flex; align-items: center; gap: 6px;
+            background: #fff; padding: 4px 10px; border-radius: 14px;
+            border: 1px solid #eee;
+        }
+        .chart-legend-swatch {
+            width: 14px; height: 14px; border-radius: 3px; display: inline-block;
+        }
+        .chart-legend-place {
+            font-weight: bold; font-size: 12px; color: #fff;
+            background: var(--drk); border-radius: 50%;
+            width: 20px; height: 20px; display: flex;
+            align-items: center; justify-content: center;
+        }
+        .chart-legend-place.p1 { background: #d4a017; }  /* золото */
+        .chart-legend-place.p2 { background: #8a8a8a; }  /* серебро */
+        .chart-legend-place.p3 { background: #a36a2f; }  /* бронза */
+        .chart-empty {
+            text-align: center; padding: 40px 10px; color: #888;
+            font-style: italic; font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -265,6 +297,15 @@
         </table>
     </div>
 
+    <!-- ГРАФИК ОЧКОВ ПО МАТЧАМ -->
+    <div class="card">
+        <h2>📈 Динамика очков команд по матчам</h2>
+        <div class="chart-wrap">
+            <canvas id="chart-canvas"></canvas>
+        </div>
+        <div class="chart-legend" id="chart-legend"></div>
+    </div>
+
     <!-- ИСТОРИЯ -->
     <div class="card">
         <h2>История матчей</h2>
@@ -308,8 +349,6 @@
     let currentMatchScorers1 = []; let currentMatchScorers2 = [];
     let currentMatchAutogoals1 = 0; let currentMatchAutogoals2 = 0;
 
-    // Live-state текущего матча — синхронизируется через Firebase,
-    // чтобы табло видели все пользователи.
     let liveState = {
         active: false,
         t1: "",
@@ -322,6 +361,16 @@
         timerRunning: false
     };
 
+    // Палитра цветов для графика. Для стандартных имён — фиксированные цвета,
+    // для остальных — по кругу из palette.
+    const TEAM_COLOR_MAP = {
+        "красные": "#e53935",
+        "синие": "#1e88e5",
+        "зеленые": "#43a047",
+        "зелёные": "#43a047"
+    };
+    const TEAM_COLOR_PALETTE = ["#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00acc1", "#6d4c41", "#d81b60"];
+
     const audioObj = new (window.AudioContext || window.webkitAudioContext)();
     function beep() {
         if (audioObj.state === 'suspended') audioObj.resume();
@@ -331,6 +380,16 @@
         vol.gain.setValueAtTime(1, audioObj.currentTime); osc.start();
         vol.gain.exponentialRampToValueAtTime(0.001, audioObj.currentTime + 1.5);
         osc.stop(audioObj.currentTime + 1.5);
+    }
+
+    function getTeamColor(teamName, index) {
+        var key = (teamName || "").toLowerCase().trim();
+        if (TEAM_COLOR_MAP[key]) return TEAM_COLOR_MAP[key];
+        // Частичные совпадения для гибкости
+        if (key.indexOf("крас") === 0) return "#e53935";
+        if (key.indexOf("син") === 0) return "#1e88e5";
+        if (key.indexOf("зел") === 0) return "#43a047";
+        return TEAM_COLOR_PALETTE[index % TEAM_COLOR_PALETTE.length];
     }
 
     function activateJudgeMode() {
@@ -350,7 +409,6 @@
     }
 
     // ---------------- LIVE-ТАБЛО ----------------
-    // Обновляет локальный live-state по текущим значениям панели ввода.
     function refreshLiveStateFromInputs() {
         var t1 = document.getElementById('t1') ? document.getElementById('t1').value : "";
         var t2 = document.getElementById('t2') ? document.getElementById('t2').value : "";
@@ -1162,7 +1220,6 @@
             t1Rating: teamRatings[teamA] || 0, t2Rating: teamRatings[teamB] || 0
         });
         resetScorers();
-        // Сбрасываем live-табло у всех
         liveState = {
             active: false, t1: "", t2: "", s1: 0, s2: 0,
             scorers1: [], scorers2: [], timeCurrent: timeMax, timerRunning: false
@@ -1199,15 +1256,12 @@
         }, 2000);
     }
 
-    // Слушатель live-матча — чтобы все видели табло, даже не судья
     function startLiveListener() {
         setInterval(async () => {
             try {
                 var res = await fetch(FIREBASE_URL + "/live_match.json");
                 var data = await res.json();
                 if (data && typeof data.active !== 'undefined') {
-                    // Обновляем liveState, но не затираем локальные значения у судьи,
-                    // если он как раз вводит матч
                     if (document.body.classList.contains('is-judge')) return;
                     liveState = {
                         active: !!data.active,
@@ -1322,16 +1376,35 @@
 
         games = games.filter(function(g) { return g !== null && g !== undefined; });
 
+        // Для графика: для каждой команды храним накопленные очки после каждого матча.
+        // Порядок матчей — тот, в котором они в games (id по времени создания).
+        var pointsSeries = {}; // team -> [0, ptsAfter1, ptsAfter2, ...]
+        var matchesSeries = {}; // team -> [0, 1, 2, ...]
+        var matchCounts = {};
+        teams.forEach(function(t) {
+            pointsSeries[t] = [0];
+            matchesSeries[t] = [0];
+            matchCounts[t] = 0;
+        });
+
         games.forEach(function(g) {
             if (data[g.t1] && data[g.t2]) {
                 data[g.t1].gf += g.s1; data[g.t1].ga += g.s2;
                 data[g.t2].gf += g.s2; data[g.t2].ga += g.s1;
-                if (g.s1 > g.s2) { data[g.t1].w++; data[g.t1].pts += 3; data[g.t2].l++; } 
-                else if (g.s1 < g.s2) { data[g.t2].w++; data[g.t2].pts += 3; data[g.t1].l++; } 
-                else { data[g.t1].d++; data[g.t1].pts += 1; data[g.t2].d++; data[g.t2].pts += 1; }
+                var pts1 = 0, pts2 = 0;
+                if (g.s1 > g.s2) { data[g.t1].w++; data[g.t1].pts += 3; data[g.t2].l++; pts1 = 3; pts2 = 0; } 
+                else if (g.s1 < g.s2) { data[g.t2].w++; data[g.t2].pts += 3; data[g.t1].l++; pts1 = 0; pts2 = 3; } 
+                else { data[g.t1].d++; data[g.t1].pts += 1; data[g.t2].d++; data[g.t2].pts += 1; pts1 = 1; pts2 = 1; }
 
                 if (g.scorers1) g.scorers1.forEach(function(p) { if(playerStats[p] !== undefined) playerStats[p]++; });
                 if (g.scorers2) g.scorers2.forEach(function(p) { if(playerStats[p] !== undefined) playerStats[p]++; });
+
+                matchCounts[g.t1] = (matchCounts[g.t1] || 0) + 1;
+                matchCounts[g.t2] = (matchCounts[g.t2] || 0) + 1;
+                pointsSeries[g.t1][matchCounts[g.t1]] = data[g.t1].pts;
+                pointsSeries[g.t2][matchCounts[g.t2]] = data[g.t2].pts;
+                matchesSeries[g.t1][matchCounts[g.t1]] = matchCounts[g.t1];
+                matchesSeries[g.t2][matchCounts[g.t2]] = matchCounts[g.t2];
             }
         });
 
@@ -1377,12 +1450,13 @@
                     '</div>';
             }).join('');
 
-        // Бомбардиры с подсветкой одинаковых значений голов
         renderScorersWithGroups(playerStats);
+
+        // Рисуем график очков по матчам
+        drawChart(pointsSeries, matchesSeries, data, order);
     }
 
-    // Отрисовка таблицы бомбардиров с цветовой группировкой по числу голов.
-    // Игроки с одинаковым количеством голов получают одинаковый цвет.
+    // Отрисовка таблицы бомбардиров с группировкой по голам
     function renderScorersWithGroups(playerStats) {
         var scorersOrder = Object.keys(playerStats)
             .map(function(n) { return { name: n, goals: playerStats[n] }; })
@@ -1400,21 +1474,18 @@
             return;
         }
 
-        // Группируем по числу голов
-        var groups = {}; // goals -> [names]
+        var groups = {};
         scorersOrder.forEach(function(p) {
             if (!groups[p.goals]) groups[p.goals] = [];
             groups[p.goals].push(p.name);
         });
 
-        // Присваиваем уникальным значениям голов уникальные классы цветов (1..8)
-        var goalsValues = Object.keys(groups).map(Number).sort(function(a,b){ return b-a; }); // по убыванию
+        var goalsValues = Object.keys(groups).map(Number).sort(function(a,b){ return b-a; });
         var classMap = {};
         goalsValues.forEach(function(g, idx) {
             classMap[g] = 'scorers-group-' + ((idx % 8) + 1);
         });
 
-        // Определяем, кто на 1-м месте (максимум голов) — для жирного шрифта
         var maxGoals = goalsValues[0];
 
         tbody.innerHTML = scorersOrder.map(function(p, idx) {
@@ -1427,6 +1498,195 @@
             '</tr>';
         }).join('');
     }
+
+    // ---------------- ГРАФИК ----------------
+    // Рисует на canvas 3 линии (по командам): X — накопленные матчи, Y — накопленные очки.
+    // На конце каждой линии — маркер с номером места (1/2/3) по итоговым очкам.
+    function drawChart(pointsSeries, matchesSeries, data, order) {
+        var canvas = document.getElementById('chart-canvas');
+        var legend = document.getElementById('chart-legend');
+        if (!canvas) return;
+
+        // Если матчей нет — показываем заглушку
+        var totalGames = games.length;
+        if (totalGames === 0) {
+            canvas.style.display = 'none';
+            if (legend) legend.innerHTML = '';
+            // Показать «нет данных» — простой способ: поверх canvas
+            var wrap = canvas.parentElement;
+            var oldEmpty = wrap.querySelector('.chart-empty');
+            if (oldEmpty) oldEmpty.remove();
+            var empty = document.createElement('div');
+            empty.className = 'chart-empty';
+            empty.innerText = 'Пока нет сыгранных матчей для построения графика';
+            wrap.appendChild(empty);
+            return;
+        } else {
+            var oldEmpty2 = canvas.parentElement.querySelector('.chart-empty');
+            if (oldEmpty2) oldEmpty2.remove();
+            canvas.style.display = 'block';
+        }
+
+        // Адаптивные размеры
+        var dpr = window.devicePixelRatio || 1;
+        var cssWidth = canvas.parentElement.clientWidth || 600;
+        var cssHeight = 320;
+        canvas.style.width = cssWidth + 'px';
+        canvas.style.height = cssHeight + 'px';
+        canvas.width = Math.floor(cssWidth * dpr);
+        canvas.height = Math.floor(cssHeight * dpr);
+
+        var ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+        var padL = 42, padR = 56, padT = 20, padB = 34;
+        var plotW = cssWidth - padL - padR;
+        var plotH = cssHeight - padT - padB;
+
+        // Максимумы осей
+        var maxMatches = 1;
+        var maxPoints = 1;
+        teams.forEach(function(t) {
+            var ms = matchesSeries[t] || [0];
+            var ps = pointsSeries[t] || [0];
+            if (ms.length > 0) maxMatches = Math.max(maxMatches, ms[ms.length - 1]);
+            if (ps.length > 0) maxPoints = Math.max(maxPoints, ps[ps.length - 1]);
+        });
+        // Шаг по Y — красивые круглые числа
+        var yStep = Math.max(1, Math.ceil(maxPoints / 5));
+        var yTop = Math.ceil(maxPoints / yStep) * yStep;
+        if (yTop === 0) yTop = 3;
+        var xStep = Math.max(1, Math.ceil(maxMatches / 10));
+        var xTop = Math.ceil(maxMatches / xStep) * xStep;
+        if (xTop === 0) xTop = 1;
+
+        function xOf(m) { return padL + (m / xTop) * plotW; }
+        function yOf(p) { return padT + plotH - (p / yTop) * plotH; }
+
+        // Фон сетки
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(padL, padT, plotW, plotH);
+
+        // Горизонтальные линии (Y)
+        ctx.strokeStyle = '#e9ecef';
+        ctx.lineWidth = 1;
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillStyle = '#888';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (var y = 0; y <= yTop; y += yStep) {
+            var py = yOf(y);
+            ctx.beginPath();
+            ctx.moveTo(padL, py);
+            ctx.lineTo(padL + plotW, py);
+            ctx.stroke();
+            ctx.fillText(String(y), padL - 6, py);
+        }
+
+        // Вертикальные линии (X) — каждая 1 или xStep
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (var x = 0; x <= xTop; x += xStep) {
+            var px = xOf(x);
+            ctx.beginPath();
+            ctx.moveTo(px, padT);
+            ctx.lineTo(px, padT + plotH);
+            ctx.stroke();
+            ctx.fillText(String(x), px, padT + plotH + 6);
+        }
+
+        // Подписи осей
+        ctx.fillStyle = '#555';
+        ctx.font = 'bold 11px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Матчи', padL + plotW / 2, padT + plotH + 20);
+        ctx.save();
+        ctx.translate(12, padT + plotH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Очки', 0, 0);
+        ctx.restore();
+
+        // Места по итоговым очкам
+        var sortedByPts = [...teams].sort(function(a, b) {
+            if (data[b].pts !== data[a].pts) return data[b].pts - data[a].pts;
+            if (data[b].diff !== data[a].diff) return data[b].diff - data[a].diff;
+            if (data[b].gf !== data[a].gf) return data[b].gf - data[a].gf;
+            return data[b].rating - data[a].rating;
+        });
+        var placeByTeam = {};
+        sortedByPts.forEach(function(t, idx) { placeByTeam[t] = idx + 1; });
+
+        // Рисуем линии
+        teams.forEach(function(t, teamIdx) {
+            var color = getTeamColor(t, teamIdx);
+            var xs = matchesSeries[t] || [0];
+            var ys = pointsSeries[t] || [0];
+
+            // Линия
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            for (var k = 0; k < xs.length; k++) {
+                var xx = xOf(xs[k]);
+                var yy = yOf(ys[k]);
+                if (k === 0) ctx.moveTo(xx, yy);
+                else ctx.lineTo(xx, yy);
+            }
+            ctx.stroke();
+
+            // Точки
+            for (var k2 = 0; k2 < xs.length; k2++) {
+                var px2 = xOf(xs[k2]);
+                var py2 = yOf(ys[k2]);
+                ctx.beginPath();
+                ctx.fillStyle = color;
+                ctx.arc(px2, py2, 3.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // Метка с местом на конце линии
+            var lastX = xOf(xs[xs.length - 1]);
+            var lastY = yOf(ys[ys.length - 1]);
+            var place = placeByTeam[t] || 0;
+            var placeColor = place === 1 ? '#d4a017' : (place === 2 ? '#8a8a8a' : (place === 3 ? '#a36a2f' : '#495057'));
+            ctx.beginPath();
+            ctx.fillStyle = placeColor;
+            ctx.arc(lastX + 14, lastY, 11, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(place), lastX + 14, lastY + 0.5);
+        });
+
+        // Легенда
+        if (legend) {
+            var legendHtml = teams.map(function(t, i) {
+                var color = getTeamColor(t, i);
+                var place = placeByTeam[t];
+                var placeCls = place === 1 ? 'p1' : (place === 2 ? 'p2' : (place === 3 ? 'p3' : ''));
+                return '<div class="chart-legend-item">' +
+                    '<span class="chart-legend-swatch" style="background:' + color + ';"></span>' +
+                    '<span style="font-weight:bold; color:' + color + ';">' + t + '</span>' +
+                    '<span style="color:#666;">— ' + data[t].pts + ' очк.</span>' +
+                    '<span class="chart-legend-place ' + placeCls + '">' + place + '</span>' +
+                '</div>';
+            }).join('');
+            legend.innerHTML = legendHtml;
+        }
+    }
+
+    // Перерисовка графика при ресайзе окна
+    window.addEventListener('resize', function() {
+        if (typeof refresh === 'function') refresh();
+    });
 
     async function clearAllTournamentData() {
         if (!document.body.classList.contains('is-judge')) return;
